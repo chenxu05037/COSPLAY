@@ -161,86 +161,79 @@ def visualize_topk_nodes_with_values(tensor, vocab, k=10, concept=False, matrix=
     return visualization
 
 
-def cal_final_reward(fcg_score, recall_score, coherent_score, language_score, weights):
-    reward_a_list = weights[0] * fcg_score + \
-                    weights[1] * recall_score + \
-                    weights[2] * coherent_score + \
-                    weights[3] * language_score
-    reward_a_baseline = reward_a_list.mean(axis=0, keepdims=True)
-    reward_a_list = reward_a_list - reward_a_baseline
-    return reward_a_list
+def normalization(scores):
+    min_score = scores.min()
+    max_score = scores.max()
+    diff_reward = max_score - min_score + 1e-6
+    return (scores - min_score) / diff_reward
 
 
-def cal_finding_common_ground_score(send_messages_list, receive_messages_list,
-                                    trainer_persona, partner_persona, kw_graph_distance_matrix, device, r=None):
-    # calulate persona ground
-    both_persona_str = trainer_persona + ' ' + partner_persona
-    persona_concepts = extract_concepts(both_persona_str, 50)
-    persona_ground = torch.scatter(input=torch.zeros(2680).to(device), dim=-1,
-                                   index=torch.tensor(persona_concepts).to(device),
-                                   src=torch.ones_like(torch.tensor(persona_concepts, dtype=torch.float).to(device)))
-    persona_ground[0] = 0
-    # num_persona_ground_concepts = persona_ground.sum().item()
-
-    batch_size = len(send_messages_list[0])
-    num_turn = len(send_messages_list)
-    # calculate common ground
-    # common_grounds = [[[] for _ in range(num_turn)] for _ in range(batch_size)]
-    # num_common_ground_concepts = [[0 for _ in range(num_turn)] for _ in range(batch_size)]
-    fcg_scores = [[0 for _ in range(num_turn)] for _ in range(batch_size)]
-    recall_scores = [[0 for _ in range(num_turn)] for _ in range(batch_size)]
-    common_ground_history = [torch.zeros(2680).to(device) for _ in range(batch_size)]
-    for idx_turn, receive_messages, send_messages in zip(
-            reversed(range(num_turn)), reversed(receive_messages_list), reversed(send_messages_list)):
-        for idx_batch, receive_message, send_message in zip(range(batch_size), receive_messages, send_messages):
-            concepts = extract_concepts(send_message + ' ' + receive_message, 50)
-            common_ground_current = torch.scatter(input=torch.zeros(2680).to(device), dim=-1,
-                                                  index=torch.tensor(concepts).to(device),
-                                                  src=torch.ones_like(
-                                                      torch.tensor(concepts, dtype=torch.float).to(device)))
-            if have_concepts_in(common_ground_current):
-                common_ground_current[0] = 0
-            common_ground = (common_ground_current + common_ground_history[idx_batch]).clamp(0, 1)
-            common_ground_history[idx_batch] = common_ground
-            # if no concept, then the common_ground_one_turn[0] will be scattered by 1.
-
-            # num_common_ground_concepts[idx_batch][idx_turn] += common_ground.sum().item()
-            precision_score = fcg_precision_score(persona_ground, common_ground, kw_graph_distance_matrix)
-            fcg_scores[idx_batch][idx_turn] += precision_score
-
-            recall_score = fcg_recall_score(persona_ground, common_ground, kw_graph_distance_matrix, r)
-            recall_scores[idx_batch][idx_turn] += recall_score / (num_turn - idx_turn + 1)
-            # common_grounds[idx_batch][idx_turn] += common_ground.tolist()
-
-    # common_grounds = torch.tensor(common_grounds, dtype=torch.bool).to(device)
-    # num_common_ground_concepts = torch.tensor(num_common_ground_concepts).to(device)
-    # concepts2persona_ground = (kw_graph_distance_matrix * persona_ground).sum(-1) / num_persona_ground_concepts
-    # fcg_precision = (common_grounds * concepts2persona_ground).sum(-1) / num_common_ground_concepts
-    return fcg_scores, recall_scores
+def standardization(rewards):
+    reward_baseline = rewards.mean(axis=0, keepdims=True)
+    reward_list = rewards - reward_baseline
+    return reward_list
 
 
-def fcg_precision_score(persona_ground, common_ground, distance_matrix):
-    persona_ground = persona_ground.type(torch.bool)
-    common_ground = common_ground.type(torch.bool)
-    score = distance_matrix['matrix'][common_ground][:, persona_ground].mean()
-    if score.isnan():
-        score = distance_matrix['max']
+def concept_set(concepts, device):
+    # convert concepts into concept set
+    concept_set = torch.scatter(input=torch.zeros(2680).to(device), dim=-1, index=torch.tensor(concepts).to(device),
+                                src=torch.ones_like(torch.tensor(concepts, dtype=torch.float).to(device)))
+    concept_set[0] = 0
+    return concept_set
+
+
+def set_dist_operation(a, b, dist_matrix):
+    matrix = dist_matrix['matrix']
+    dist = a.unsqueeze(0).mm(matrix).mm(b.unsqueeze(1)) / (a.sum() * b.sum())
+    if dist.isnan():
+        dist = dist_matrix['max']
+    return dist.item()
+
+
+def set_union_operation(a, b):
+    return torch.logical_or(a, b).type(torch.float)
+
+
+def set_expa_operation(dist_matrix, concept_set, topk=None, concept2words_map=None):
+    matrix = dist_matrix['matrix']
+    max = dist_matrix['max']
+
+    to_persona_dist = matrix * concept_set.unsqueeze(1)  # [bs, 2680]
+    # mask 后产生 0， 需要将其替换为 max
+    to_persona_dist = torch.where(to_persona_dist.eq(0), torch.ones_like(to_persona_dist) * 100,
+                                  to_persona_dist)
+
+    to_persona_dist = max - to_persona_dist.min(dim=-1)[0]
+
+    # 去掉 GPT 词典中没有的 concept for attention calculation
+    to_persona_dist = to_persona_dist * concept2words_map.sum(-1).ne(0)
+    to_persona_dist = torch.where(to_persona_dist.eq(0), torch.ones_like(to_persona_dist) * -1e10, to_persona_dist)
+
+    to_persona_dist = top_k_logits(to_persona_dist, topk)
+    # 精确 topk 个数，for attention calculation
+    expanded_set = torch.scatter(input=torch.zeros_like(to_persona_dist),
+                                 index=to_persona_dist.topk(topk)[1],
+                                 src=torch.ones_like(to_persona_dist),
+                                 dim=-1)
+
+    return expanded_set
+
+
+def persona_recall_score(persona_set, future_set, dist_matrix, r=0.2):
+    inter_set = set_inter_operation(future_set, persona_set, dist_matrix, r=r)
+    recall_score = inter_set.sum() / sum(persona_set).clamp(0.1)
+    return recall_score.item()
+
+
+def set_inter_operation(a, b, dist_matrix, r):
+    a = a.type(torch.bool)
+    b = b.type(torch.bool)
+    M = dist_matrix['matrix'][a][:, b]
+    if 0 == M.size(0) * M.size(1):
+        inter_set = torch.zeros_like(a)
     else:
-        score = - score.item()
-    return score
-
-
-def fcg_recall_score(persona_ground, common_ground, distance_matrix, threshold=0.8):
-    persona_ground = persona_ground.type(torch.bool)
-    common_ground = common_ground.type(torch.bool)
-    scores = distance_matrix['matrix'][common_ground][:, persona_ground]
-    if 0 == scores.size(0) * scores.size(1):
-        score = 0
-    else:
-        overlap_ground = torch.where(scores < threshold, torch.ones_like(scores), torch.zeros_like(scores)).sum(
-            0).clamp(0, 1)
-        score = overlap_ground.sum() / len(overlap_ground)
-    return score.item()
+        inter_set = torch.where(M < r, torch.ones_like(M), torch.zeros_like(M)).sum(0).clamp(0, 1)
+    return inter_set
 
 
 def have_concepts_in(common_ground_one_turn):
@@ -351,11 +344,11 @@ def cal_concept_set(opt, context_concepts, persona_set, kw_graph_distance_matrix
     context_set = cal_context_set(context_concepts=context_concepts,
                                   lower_bound=context_lower_bound, device=device)
     SET_EXPANSION()
-    union_set = set_union(context_set, persona_set)
+    union_set = set_union_operation(context_set, persona_set)
     SET_EXPANSION()
-    expanded_set = set_expansion(dist_matrix=kw_graph_distance_matrix,
-                                 concept_set=union_set, topk=k,
-                                 concept2words_map=concept2words_map)
+    expanded_set = set_expa_operation(dist_matrix=kw_graph_distance_matrix,
+                                      concept_set=union_set, topk=k,
+                                      concept2words_map=concept2words_map)
 
     has_concept = expanded_set.sum(-1).clamp(0, 1).unsqueeze(-1)
     expanded_set = expanded_set * has_concept + (1 - has_concept)
@@ -385,35 +378,6 @@ def cal_middle_pool(distance_matrix, context_pool, persona_concept_mask, softmax
                          dim=-1)
 
     return pool
-
-
-def set_union(a, b):
-    return torch.logical_or(a, b)
-
-
-def set_expansion(dist_matrix, concept_set, topk=None, concept2words_map=None):
-    matrix = dist_matrix['matrix']
-    max = dist_matrix['max']
-
-    to_persona_dist = matrix * concept_set.unsqueeze(1)  # [bs, 2680]
-    # mask 后产生 0， 需要将其替换为 max
-    to_persona_dist = torch.where(to_persona_dist.eq(0), torch.ones_like(to_persona_dist) * 100,
-                                  to_persona_dist)
-
-    to_persona_dist = max - to_persona_dist.min(dim=-1)[0]
-
-    # 去掉 GPT 词典中没有的 concept for attention calculation
-    to_persona_dist = to_persona_dist * concept2words_map.sum(-1).ne(0)
-    to_persona_dist = torch.where(to_persona_dist.eq(0), torch.ones_like(to_persona_dist) * -1e10, to_persona_dist)
-
-    to_persona_dist = top_k_logits(to_persona_dist, topk)
-    # 精确 topk 个数，for attention calculation
-    expanded_set = torch.scatter(input=torch.zeros_like(to_persona_dist),
-                                 index=to_persona_dist.topk(topk)[1],
-                                 src=torch.ones_like(to_persona_dist),
-                                 dim=-1)
-
-    return expanded_set
 
 
 def cal_lm_word_probs(logits, softmax, temperature=1.0):

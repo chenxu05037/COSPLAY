@@ -1010,7 +1010,7 @@ class TransformerAgent(Agent):
                 vis=data_for_visualization)
 
         if is_training is False and self.opt.get(
-                'eval_c_recall') is None and data_for_visualization is not None and len(data_for_visualization) > 0:
+                'eval_c_recall') is None and self.opt.get('visualization') and data_for_visualization is not None and len(data_for_visualization) > 0:
             visualize_samples(data_for_visualization, self.dict, valid_inds, observations)
 
         if cand_preds is not None:

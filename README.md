@@ -1,9 +1,15 @@
 # COSPLAY
-This is a messy version code (under testing) for the paper [COSPLAY: Concept Set Guided Personalized Dialogue Generation Across Both Party Personas](https://dl.acm.org/doi/abs/10.1145/3477495.3531957) (SIGIR 2022).
+
+This is a messy version code (under testing) for the
+paper [COSPLAY: Concept Set Guided Personalized Dialogue Generation Across Both Party Personas](https://dl.acm.org/doi/abs/10.1145/3477495.3531957) (SIGIR 2022).
 
 ## Requirement
-We provide the conda env ([cosplay.zip](https://drive.google.com/file/d/1RPcT7QCmUxZ9J7sVS13cfGZUIT6GbWI6/view?usp=share_link)) to setup environment. 
+
+We provide the conda
+env ([cosplay.zip](https://drive.google.com/file/d/1RPcT7QCmUxZ9J7sVS13cfGZUIT6GbWI6/view?usp=share_link)) to setup
+environment.
 With conda installed, create cosplay conda environment by:
+
 ```
 unzip cosplay.zip
 conda create --name cos --clone cosplay
@@ -11,15 +17,23 @@ conda activate cos
 ```
 
 ## Train COSPLAY in Supervised Learning
+
 ```
 python train_cosplay_in_supervised.py
 ```
 
 ## Train COSPLAY in Reinforced Learning
 
+```
+python train_cosplay_in_reinforced.py
+```
+
+## Evaluate COSPLAY
 
 ## Citation
+
 If you use this codebase in your work, please consider citing our paper:
+
 ```
 @inproceedings{xu2022cosplay,
   title={COSPLAY: Concept Set Guided Personalized Dialogue Generation Across Both Party Personas},
