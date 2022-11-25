@@ -17,7 +17,7 @@ conda activate cos
 ```
 
 ## Data
-The dataset and the preprocessed data for concept set framework can be found here ([data.zip]()).
+The dataset and the preprocessed data for concept set framework can be found here ([data.zip](https://drive.google.com/file/d/1Pjxa33KfjwqcSZRlhhwCgucelpSn8_A5/view?usp=share_link)).
 ```
 unzip data.zip
 ```
