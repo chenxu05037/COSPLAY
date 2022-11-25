@@ -17,7 +17,7 @@ from agents.cosplay.cosplay import GPTDictionaryAgent, Gpt2SeqModel
 from agents.cosplay.utils import maintain_dialog_history, PaddingUtils, round_sigfigs
 from agents.cosplay.seq2seq.model import Seq2seqModel
 from torch.optim import SGD, lr_scheduler, Adagrad
-from agents.receiver.receiver import ReceiverEncoder, split_pad_vector, split_pad_vector_for_bug
+from agents.utils.utils import split_pad_vector, split_pad_vector_for_bug
 from agents.cosplay_rl.utils import prepare_for_understand
 from agents.common.dict_helper import SpecialToken
 from agents.cosplay.gpt.loss import TokenCrossEntropyLoss
@@ -39,7 +39,7 @@ task_key_word = 'OriginalPersonaTeacher'
 
 
 def _setup_op(opt, component):
-    assert component in ['cosplay', 'receiver']
+    assert component in ['cosplay', 'utils']
     new_opt = deepcopy(opt)
     for k, v in opt.items():
         if k.endswith(component):
@@ -62,9 +62,6 @@ class CosplayRLAgent(Agent):
         agent = argparser.add_argument_group('DSquare Arguments')
         agent.add_argument('--init-model-cosplay', type=str, default=None,
                            help='Load weights from pre-trained cosplay')
-        agent.add_argument('--init-model-receiver', type=str, default=None,
-                           help='Load weights from pre-trained receiver')
-        # agent.add_argument('--history-replies', default=None)
 
         # cosplay argument
         agent.add_argument('-bzt', '--batchsize-cosplay')
@@ -179,56 +176,7 @@ class CosplayRLAgent(Agent):
         agent.add_argument('--decode_max_seq_len', type=int, default=24)
         agent.add_argument('--shuffle_persona', type=bool, default=True)
 
-        # receiver opt
-        agent.add_argument('--model-file-receiver')
-        agent.add_argument('--dict-file-receiver')
-        agent.add_argument('-bzr', '--batchsize-receiver')
-        agent.add_argument('-lrr', '--learningrate-receiver')
-        agent.add_argument('-optr', '--optimizer-receiver')
-        agent.add_argument('-rcr', '--rank-candidates-receiver', type='bool',
-                           default=False,
-                           help='rank candidates if available. this is done by'
-                                ' computing the prob score per token for each '
-                                'candidate and selecting the highest scoring.')
-        agent.add_argument('-rnnr', '--rnn-class-receiver', default='lstm',
-                           choices=ReceiverEncoder.RNN_OPTS.keys(),
-                           help='Choose between different types of RNNs.')
-        agent.add_argument('-ltr', '--lookuptable-receiver', default='unique',
-                           choices=['unique', 'enc_dec', 'dec_out', 'all'],
-                           help='The encoder, decoder, and output modules can '
-                                'share weights, or not. '
-                                'Unique has independent embeddings for each. '
-                                'Enc_dec shares the embedding for the encoder '
-                                'and decoder. '
-                                'Dec_out shares decoder embedding and output '
-                                'weights. '
-                                'All shares all three weights.')
-        agent.add_argument('-eszr', '--embeddingsize-receiver', type=int, default=128,
-                           help='size of the token embeddings')
-        agent.add_argument('-hsr', '--sent-hiddensize-receiver', type=int, default=128,
-                           help='size of the hidden layers')
-        agent.add_argument('-nlr', '--numlayers-receiver', type=int, default=2,
-                           help='number of hidden layers')
-        agent.add_argument('-drr', '--dropout-receiver', type=float, default=0.1,
-                           help='dropout rate')
-        agent.add_argument('-bir', '--bidirectional-receiver', type='bool',
-                           default=False,
-                           help='whether to encode the context with a '
-                                'bidirectional rnn')
-        agent.add_argument('-deszr', '--dialog-embedding-size-receiver', type=int,
-                           default=128,
-                           help='????')
-        agent.add_argument('-decr', '--decoder-receiver', default='same',
-                           choices=['same', 'shared'],
-                           help='Choose between different decoder modules. '
-                                'Default "same" uses same class as encoder, '
-                                'while "shared" also uses the same weights. '
-                                'Note that shared disabled some encoder '
-                                'options--in particular, bidirectionality.')
-        agent.add_argument('-attr', '--attention-receiver', default='none',
-                           choices=['none', 'general'],
-                           help='Attention type')
-        # DSquare opt
+        # Cosplay-rl opt
         agent.add_argument('-rc', '--rank-candidates', type='bool',
                            default=True,
                            help='rank candidates if available. this is done by'
@@ -288,7 +236,7 @@ class CosplayRLAgent(Agent):
 
         self.persona_receiver = None  # text list which describes the agent's persona
         self.persona_cosplay = None  # text list which is used by cosplay
-        self.send_messages, self.receive_messages = [], []  # for receiver to extract persona
+        self.send_messages, self.receive_messages = [], []
 
         self.encode_max_seq_len = opt['encode_max_seq_len'] if opt['encode_max_seq_len'] > 0 else None
         self.decode_max_seq_len = opt['decode_max_seq_len'] if opt['decode_max_seq_len'] > 0 else None
@@ -345,12 +293,11 @@ class CosplayRLAgent(Agent):
             self.cosplay = shared['cosplay']
             self.metrics = shared['metrics']
             # TODO: share status
-            # self.receiver = shared['receiver']
-            # self.receiver_dict = shared['receiver_dict']
+
             # language model to score
             self.coherent_model = shared['coherent_model']
             self.language_model = shared['language_model']
-            self.id = 'Pegg Agent'
+            self.id = 'Cosplay Agent'
         else:
             if self.use_cuda:
                 print('[ Using CUDA (GPU:{})]'.format(opt['gpu']))
@@ -361,7 +308,7 @@ class CosplayRLAgent(Agent):
                 self.device = torch.device('cpu')
 
             self.answers = [None] * self.batch_size
-            self.id = 'Pegg Agent'
+            self.id = 'Cosplay Agent'
             self.dict = self.dictionary_class()(opt)
 
             # idea interface
@@ -391,12 +338,6 @@ class CosplayRLAgent(Agent):
             init_cosplay, init_receiver = None, None
             if opt.get('init_model_cosplay') and os.path.isfile(opt['init_model_cosplay']):
                 init_cosplay = opt['init_model_cosplay']
-            if opt.get('init_model_receiver') and os.path.isfile(opt['init_model_receiver']):
-                init_receiver = opt['init_model_receiver']
-
-            if init_receiver is not None:
-                print('[ Loading receiver from {} ]'.format(init_receiver))
-                receiver_status = self.load(init_receiver)
 
             if init_cosplay is not None:
                 print('[ Loading cosplay from {} ]'.format(init_cosplay))
@@ -445,8 +386,6 @@ class CosplayRLAgent(Agent):
 
             self.coherent_model = coherent_gpt_model
 
-            # self.receiver, self.receiver_dict = _init_receiver(opt)
-
             if language_status:
                 self.coherent_model.load_state_dict(language_status['model'])
                 self.coherent_model.eval()
@@ -455,16 +394,12 @@ class CosplayRLAgent(Agent):
 
             if cosplay_status:
                 self.cosplay.load_state_dict(cosplay_status['model'])
-            if receiver_status:
-                self.receiver.load_state_dict(receiver_status['model'])
-                # do not calculate gradient
-                self.receiver.eval()
 
             if self.use_cuda:
                 print('[ Using CUDA ]')
                 self.cosplay.cuda()
-                self.coherent_model.cuda("cuda:0")
-                self.language_model.cuda('cuda:0')
+                self.coherent_model.cuda()
+                self.language_model.cuda(self.device)
                 self.device = torch.device('cuda')
             else:
                 print('[ Using CPU ]')
@@ -556,8 +491,7 @@ class CosplayRLAgent(Agent):
         shared['states'] = {  # don't share optimizer states
             'optimizer_type': self.opt.get('optimizer', None),
         }
-        # shared['receiver'] = self.receiver
-        # shared['receiver_dict'] = self.receiver_dict
+
         shared['coherent_model'] = self.coherent_model
         shared['language_model'] = self.language_model
         return shared
@@ -640,7 +574,7 @@ class CosplayRLAgent(Agent):
             # idea interface
             # self.history[labels]
 
-            if 'Pegg' in act[0]['id'] and 'init' not in self.observation[0][
+            if 'Cosplay' in act[0]['id'] and 'init' not in self.observation[0][
                 'id']:  # Only add dialogue text excluding the persona text
                 if len(self.send_messages) == 0:  # At the beginning of an episode
                     if len(self.receive_messages) == 0:  # The first speaker receive no text before it first speaks
@@ -780,8 +714,6 @@ class CosplayRLAgent(Agent):
                     use_reply=self.use_history_reply,
                     persona_append_strategy=self.persona_append_strategy,
                     history_append_strategy=self.history_append_strategy,
-                    # receiver=self.receiver,
-                    # receiver_dict=self.receiver_dict,
                     use_persona_tokens=self.use_person_tokens,
                     shuffle_persona=self.is_training and self.shuffle_persona,
                     dict=self.dict)
@@ -790,7 +722,7 @@ class CosplayRLAgent(Agent):
                 ob['text2vec'] = deque(ob['text2vec'], maxlen=self.truncate)
                 ob['turn2vec'] = deque(ob['turn2vec'], maxlen=self.truncate)
 
-        if self.is_training and 'Pegg' in first_obs['id'] and not first_obs['episode_done']:
+        if self.is_training and 'Cosplay' in first_obs['id'] and not first_obs['episode_done']:
             # observe text from the other interlocutor
             self.receive_messages.append([ob['text'] for ob in obs])
             # obs['text'] = self.persona + obs['text'] # Adding persona to the beginning of each turn
@@ -802,7 +734,7 @@ class CosplayRLAgent(Agent):
             self.observation = obs[0]
 
         if self.is_training and first_obs['episode_done'] \
-                and 'reward' in first_obs and 'Pegg' in first_obs['id'] and not self.greedy_response:
+                and 'reward' in first_obs and 'Cosplay' in first_obs['id'] and not self.greedy_response:
             # end of an self-play episode, backwards propagation
             # assume each turn, each word has similar proportion of rewards
             rewards = np.stack([o['reward'] for o in obs])  # average the reward over turns

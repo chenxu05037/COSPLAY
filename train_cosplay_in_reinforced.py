@@ -1,6 +1,6 @@
 """
 Double Dual Training
-1 Policy Gradient Training with Pre-trained Transmitter & Receiver
+1 Policy Gradient Training with Supervised Pre-trained Cosplay
 - Training in Self-play World
 - Evaluate in convai2:self
 """
@@ -10,13 +10,11 @@ import torch
 
 from scripts.train_model_selfplay import setup_args as setup_args_dict, TrainLoop
 
-# TODO: must at least two GPU as the receiver & transmitter cannot be run in the same GPU card
-#  within less than 24GB memory.
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 IS_ORIGINAL = True
 
-FCG, RECALL, COHE, LM = 1., 1., 1., 1.
+MUTUAL_BENEFIT, COMMON_GROUND, LM = 1., 1., 1.
 
 BEAM_SIZE = 2
 MODEL_NAME = 'cosplay'
@@ -37,13 +35,11 @@ def setup_args():
     decode_max_seq_len = 24
 
     if IS_ORIGINAL:
-        # receiver_basic = 'receiver_revised'
         cosplay_basic = 'cosplay_base'
         exp_task = 'tasks.convai2.agents:OriginalTeacher,tasks.convai2.agents:OriginalPersonaTeacher'
         exp_eval_task = 'tasks.convai2cosplay.agents:SelfOriginalTeacher:no_cands'
     else:
-        # receiver_basic = 'receiver_original'
-        cosplay_basic = 'pegg-r'
+        cosplay_basic = 'cosplay_base'
         exp_task = 'tasks.convai2.agents:RevisedTeacher,tasks.convai2.agents:RevisedPersonaTeacher'
         exp_eval_task = 'tasks.convai2cosplay.agents:SelfRevisedTeacher:no_cands'
 
@@ -54,7 +50,7 @@ def setup_args():
     # exp_name = 'DEBUG'
     parser.set_defaults(
         # idea add ================
-        weights=[FCG, RECALL, COHE, LM],
+        weights=[MUTUAL_BENEFIT, COMMON_GROUND, LM],
         recall_r=RECALL_R,
         # =======================
         download_path='{}/downloads'.format(DATA_DIR),
@@ -91,10 +87,6 @@ def setup_args():
         lookuptable_transmitter='enc_dec',
         embedding_type_transmitter='glove_fixed',
         optimizer_step=-1,
-        # receiver configuration
-        # model_receiver='agents.receiver.receiver:ReceiverAgent',
-        # init_model_receiver='./tmp/receiver/{}.model'.format(receiver_basic),
-        # language model configuration
         init_model_coherent='{}/{}.model'.format(BASE_DIR, cosplay_basic),
         # validation configuration
         validation_max_exs=validation_max,  # -1

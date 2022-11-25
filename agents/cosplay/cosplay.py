@@ -18,7 +18,6 @@ import json
 import os
 import math
 import pickle
-from agents.receiver.receiver import split_pad_vector
 # basic setting, we should make it easy to convert from basic setting into gpt/bert setting
 from agents.cosplay.utils import maintain_dialog_history, PaddingUtils, round_sigfigs
 from agents.cosplay.utils import SharedTable
@@ -36,6 +35,8 @@ from concept_set_framework import get_keyword_mask_matrix, create_concept_dist_m
 from concept_set_framework import prepare_example_persona_kws, prepare_batch_persona_concept_mask
 
 # lstm, transformer, gpt2
+from ..utils.utils import split_pad_vector
+
 ARCH_CHOICE = 'gpt'
 
 
@@ -213,11 +214,6 @@ class TransformerAgent(Agent):
         agent_args.add_argument('--encode_max_seq_len', type=int, default=184)
         agent_args.add_argument('--decode_max_seq_len', type=int, default=32)
 
-        # new setting on persona gate, which is implemented by Receiver
-        agent_args.add_argument('--select-persona', default=False,
-                                help='use receiver to select persona to genreate the response')
-        agent_args.add_argument('--receiver-model', default='',
-                                help='receiver model for selecting persona, else append default ones')
         agent_args.add_argument('--shuffle-persona', default=False,
                                 help='shuffle the order of persona to make model robust ')
 
@@ -308,8 +304,6 @@ class TransformerAgent(Agent):
             self.answers = shared['answers']
             self.model = shared['model']
             self.metrics = shared['metrics']
-            self.receiver = shared['receiver']
-            self.receiver_dict = shared['receiver_dict']
             states = shared.get('states', {})
         else:
             # this is not a shared instance of this class, so do full init
@@ -642,8 +636,6 @@ class TransformerAgent(Agent):
         shared['END_IDX'] = self.END_IDX
         shared['NULL_IDX'] = self.NULL_IDX
         shared['model'] = self.model
-        shared['receiver'] = self.receiver
-        shared['receiver_dict'] = self.receiver_dict
         if self.opt.get('numthreads', 1) > 1:
             # we're doing hogwild so share the model too
             if type(self.metrics) == dict:
@@ -1010,7 +1002,8 @@ class TransformerAgent(Agent):
                 vis=data_for_visualization)
 
         if is_training is False and self.opt.get(
-                'eval_c_recall') is None and self.opt.get('visualization') and data_for_visualization is not None and len(data_for_visualization) > 0:
+                'eval_c_recall') is None and self.opt.get(
+            'visualization') and data_for_visualization is not None and len(data_for_visualization) > 0:
             visualize_samples(data_for_visualization, self.dict, valid_inds, observations)
 
         if cand_preds is not None:

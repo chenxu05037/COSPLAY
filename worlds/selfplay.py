@@ -214,15 +214,15 @@ class SelfPlayWorld(DialogPartnerWorld):
 
             REWARD()
             weights = self.opt.get('weights')
-            reward_a_list = weights[0] * self_common_ground_reward + \
-                            weights[1] * self_mutual_benefit_reward + \
+            reward_a_list = weights[0] * self_mutual_benefit_reward + \
+                            weights[1] * self_common_ground_reward + \
                             weights[2] * self_language_reward
             reward_a_list = standardization(reward_a_list)
 
             if is_display:
                 print('---------------- Reward ------------------')
-                print('common ground reward : {}'.format(self_common_ground_reward[0]))
                 print('mutual benefit reward : {}'.format(self_mutual_benefit_reward[0]))
+                print('common ground reward : {}'.format(self_common_ground_reward[0]))
                 print('language model reward : {}'.format(self_language_reward[0]))
 
             # Send end signal to agent a and agent b

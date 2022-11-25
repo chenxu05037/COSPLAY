@@ -9,21 +9,17 @@ nltk.data.path.append('/apdcephfs/private_chencxu/taiji_inputs/cosplay/data/nltk
 from nltk.stem import WordNetLemmatizer
 import pickle
 import torch
-import torch.nn as nn
-import numpy as np
-
-# from kw_model import KW_GNN
 
 _lemmatizer = WordNetLemmatizer()
-name_list = ['keyword2id', 'id2keyword', 'node2id', 'word2id', 'CN_hopk_graph_dict']
+name_list = ['concept2id', 'id2concept', 'node2id', 'word2id', 'CN_hopk_graph_dict']
 
 pkl_list = []
 for name in name_list:
-    with open('/apdcephfs/private_chencxu/taiji_inputs/cosplay/data/kw_model/{}.pkl'.format(name),
+    with open('/apdcephfs/private_chencxu/taiji_inputs/cosplay/data/concept_set_framework/{}.pkl'.format(name),
               "rb") as f:
         pkl_list.append(pickle.load(f))
 
-concept2id, id2keyword, node2id, word2id, CN_hopk_graph_dict = pkl_list
+concept2id, id2concept, node2id, word2id, CN_hopk_graph_dict = pkl_list
 
 
 # idea interface
@@ -71,74 +67,6 @@ def load_concept_dist_matrix(pkl_file):
     with open(pkl_file, 'rb') as pkl_in:
         ret = pickle.load(pkl_in)
     return ret
-
-
-## kw model forward
-def cal_kw_logits(inputs_for_kw_model, keyword_mask_matrix, kw_model):
-    batch_context = inputs_for_kw_model['batch_context']
-    batch_context_keywords = inputs_for_kw_model['batch_context_keywords']
-    batch_context_concepts = inputs_for_kw_model['batch_context_concepts']
-    CN_hopk_edge_index = inputs_for_kw_model['CN_hopk_edge_index']
-    with torch.no_grad():
-        kw_logits, kw_hidden_states = kw_model(CN_hopk_edge_index, batch_context_keywords,
-                                               x_utter=batch_context,
-                                               x_concept=batch_context_concepts)  # (batch_size, keyword_vocab_size)
-
-        # if keyword_mask_matrix is not None:
-        #     batch_vocab_mask = keyword_mask_matrix[batch_context_keywords].sum(dim=1).clamp(min=0,
-        #                                                                                     max=1)  # (batch_size, keyword_vocab_size)
-        #     kw_logits = (1 - batch_vocab_mask) * (
-        #         -5e4) + batch_vocab_mask * kw_logits  # (batch, vocab_size), masked logits
-
-    # if 0 != kw_logits.max() - kw_logits.min:
-    #     print()
-
-    # top_kws = kw_logits.topk(3, dim=-1)[1]
-    # (batch_size, 3), need to convert to vocab token id based on word2id
-    return kw_logits, kw_hidden_states
-
-
-def visualize_samples(data_for_visualization, dict, valid_inds, observations):
-    i = random.randint(0, len(data_for_visualization) - 1)
-    prediction = data_for_visualization[i]['prediction']
-    final_pool = data_for_visualization[i]['final_pool']
-    # from_context_probs = data_for_visualization[i]['from_context_probs']
-    # to_persona_probs = data_for_visualization[i]['to_persona_probs']
-    # concept_probs = (to_persona_probs * hybrid_weights['jump'] + from_context_probs * hybrid_weights['walk'])
-    concept_word_probs = data_for_visualization[i]['concept_word_probs']
-    hybrid_word_probs = data_for_visualization[i]['hybrid_word_probs']
-    lm_word_probs = data_for_visualization[i]['lm_word_probs']
-    gate = data_for_visualization[i]['gate'].squeeze(-1).tolist()
-
-    #  construct visulization strings
-    line_outputs = dict.vec2words(prediction.tolist())
-    vis_prediction = ' '.join(['{:>5}'.format(i) for i in line_outputs])
-    # vis_from_context_probs = visualize_topk_nodes_with_values(from_context_probs, id2keyword, k=8, concept=True)
-    # vis_to_persona_probs = visualize_topk_nodes_with_values(to_persona_probs, id2keyword, k=8, concept=True)
-    # vis_concept_probs = visualize_topk_nodes_with_values(concept_probs, id2keyword, k=8, concept=True)
-    vis_lm_word_probs = visualize_topk_nodes_with_values(lm_word_probs, dict, k=5, concept=False, matrix=True)
-    vis_concept_word_probs = visualize_topk_nodes_with_values(concept_word_probs, dict, k=5, concept=False,
-                                                              matrix=True)
-    vis_hybrid_word_probs = visualize_topk_nodes_with_values(hybrid_word_probs, dict, k=5, concept=False,
-                                                             matrix=True)
-    print('=' * 150)
-    print('【TEXT】{}'.format(observations[valid_inds[i]]['text']))
-    # print('【FROM】{}'.format(vis_from_context_probs))
-    # print('【TOPE】{}'.format(vis_to_persona_probs))
-    # print('【CONC】{}'.format(vis_concept_probs))
-    print('【POOL】{}'.format(len(final_pool)))
-    print('【PRED】{}'.format(vis_prediction))
-    gate_str = ' '.join(['{:>7}'.format(w) + '(' + str('{:.4f}'.format(g)) + ')' for w, g in
-                         zip(line_outputs, gate)])
-    print('【GATE】{}'.format(gate_str))
-    print('------------------ 【LM Word Probs】 -----------------------')
-    print('{}'.format(vis_lm_word_probs))
-    print('------------------ 【Concept Word Probs】 ------------------')
-    print('{}'.format(vis_concept_word_probs))
-    print('------------------ 【Hybrid Word Probs】 -------------------')
-    print('{}'.format(vis_hybrid_word_probs))
-
-    return
 
 
 def visualize_topk_nodes_with_values(tensor, vocab, k=10, concept=False, matrix=False):
@@ -194,37 +122,6 @@ def set_union_operation(a, b):
     return torch.logical_or(a, b).type(torch.float)
 
 
-def set_expa_operation(dist_matrix, concept_set, topk=None, concept2words_map=None):
-    matrix = dist_matrix['matrix']
-    max = dist_matrix['max']
-
-    to_persona_dist = matrix * concept_set.unsqueeze(1)  # [bs, 2680]
-    # mask 后产生 0， 需要将其替换为 max
-    to_persona_dist = torch.where(to_persona_dist.eq(0), torch.ones_like(to_persona_dist) * 100,
-                                  to_persona_dist)
-
-    to_persona_dist = max - to_persona_dist.min(dim=-1)[0]
-
-    # 去掉 GPT 词典中没有的 concept for attention calculation
-    to_persona_dist = to_persona_dist * concept2words_map.sum(-1).ne(0)
-    to_persona_dist = torch.where(to_persona_dist.eq(0), torch.ones_like(to_persona_dist) * -1e10, to_persona_dist)
-
-    to_persona_dist = top_k_logits(to_persona_dist, topk)
-    # 精确 topk 个数，for attention calculation
-    expanded_set = torch.scatter(input=torch.zeros_like(to_persona_dist),
-                                 index=to_persona_dist.topk(topk)[1],
-                                 src=torch.ones_like(to_persona_dist),
-                                 dim=-1)
-
-    return expanded_set
-
-
-def persona_recall_score(persona_set, future_set, dist_matrix, r=0.2):
-    inter_set = set_inter_operation(future_set, persona_set, dist_matrix, r=r)
-    recall_score = inter_set.sum() / sum(persona_set).clamp(0.1)
-    return recall_score.item()
-
-
 def set_inter_operation(a, b, dist_matrix, r):
     a = a.type(torch.bool)
     b = b.type(torch.bool)
@@ -236,54 +133,37 @@ def set_inter_operation(a, b, dist_matrix, r):
     return inter_set
 
 
+def set_expa_operation(a, dist_matrix, topk=None, concept2words_map=None):
+    matrix = dist_matrix['matrix']
+    max = dist_matrix['max']
+
+    to_a_dist = matrix * a.unsqueeze(1)  # [bs, 2680]
+    # mask 后产生 0， 需要将其替换为 max
+    to_a_dist = torch.where(to_a_dist.eq(0), torch.ones_like(to_a_dist) * 100, to_a_dist)
+
+    to_a_dist = max - to_a_dist.min(dim=-1)[0]
+
+    # 去掉 GPT 词典中没有的 concept for attention calculation
+    to_a_dist = to_a_dist * concept2words_map.sum(-1).ne(0)
+
+    to_a_dist = torch.where(to_a_dist.eq(0), torch.ones_like(to_a_dist) * -1e10, to_a_dist)
+    to_a_dist = top_k_logits(to_a_dist, topk)
+
+    # 精确 topk 个数，for attention calculation
+    expanded_a = torch.scatter(input=torch.zeros_like(to_a_dist), index=to_a_dist.topk(topk)[1],
+                               src=torch.ones_like(to_a_dist), dim=-1)
+
+    return expanded_a
+
+
+def persona_recall_score(persona_set, future_set, dist_matrix, r=0.2):
+    inter_set = set_inter_operation(future_set, persona_set, dist_matrix, r=r)
+    recall_score = inter_set.sum() / sum(persona_set).clamp(0.1)
+    return recall_score.item()
+
+
 def have_concepts_in(common_ground_one_turn):
     return common_ground_one_turn.sum() > 1
-
-
-def cal_next_pool(logits, context_pool, softmax, topk=300):
-    # neighbors = kw_mask_matrix[context_kws].sum(dim=1).clamp(min=0, max=1)  # (keyword_vocab_size)
-    # kw_logits: (vocab, )
-    # num_neighbors = neighbors.sum(1).long()
-    # has_neighbors = num_neighbors.clamp(0, 1).unsqueeze(1).expand(-1, kw_logits.size(-1))
-    # neighbor_filter = kw_logits * ((1 - has_neighbors) + neighbors)
-    # logits = walk_logits(neighbor_filter, 10)
-    has_context = context_pool.eq(1).sum(dim=-1).clamp(0, 1).unsqueeze(-1)  # [bs, 1]
-    if topk is not None:
-        logits = top_k_logits(logits, topk)
-    probs = softmax(logits / 1.0)
-    pool = probs > 1e-5
-    pool = pool * has_context + (1 - has_context)
-    return pool, probs
-
-
-def cal_concept_pool(concept_logits, distance_matrix, context_concepts, persona_concept_mask, max_pool_size, softmax):
-    batch_size = concept_logits.size(0)
-    max = distance_matrix['max']
-    context_concept_mask = torch.scatter(input=torch.zeros_like(concept_logits, dtype=torch.bool),
-                                         src=torch.ones_like(context_concepts, dtype=torch.bool),
-                                         index=context_concepts, dim=-1)  # [bs, 2680]
-    context_concept_mask[:, 0:2] = 0
-
-    masked_matrix = context_concept_mask.unsqueeze(-1) * \
-                    distance_matrix['matrix'].unsqueeze(0).expand(batch_size, -1, -1) * \
-                    persona_concept_mask.unsqueeze(1)
-
-    d_c2p = torch.where(masked_matrix.eq(0), torch.ones_like(masked_matrix) * max,
-                        masked_matrix).view(batch_size, -1).min(dim=-1)[0]
-
-    masked_matrix = distance_matrix['matrix'] * persona_concept_mask.unsqueeze(1)
-    d_n2p = torch.where(masked_matrix.eq(0), torch.ones_like(masked_matrix) * max, masked_matrix).min(dim=-1)[0]
-
-    mask = (d_n2p - d_c2p.unsqueeze(-1)) < 0
-
-    masked_concept_logits = torch.where((concept_logits * mask).eq(0), torch.ones_like(concept_logits) * -1e10,
-                                        concept_logits)
-
-    logits = top_k_logits(masked_concept_logits, max_pool_size)
-    concept_probs = softmax(logits)
-    concept_pool = concept_probs > 1e-5
-
-    return concept_pool, concept_probs
 
 
 def cal_context_set(context_concepts, device, lower_bound=0):
@@ -300,43 +180,6 @@ def cal_context_set(context_concepts, device, lower_bound=0):
     return context_concept_pool
 
 
-def cal_to_persona_pool(distance_matrix, context_pool, persona_concept_mask, softmax, use_min=False,
-                        concept2words_map=None):
-    batch_size = context_pool.size(0)
-    matrix = distance_matrix['matrix']
-    max = distance_matrix['max']
-
-    has_concept = (context_pool + persona_concept_mask).sum(dim=-1).clamp(0, 1).unsqueeze(-1)  # [bs, 1]
-
-    masked_matrix = context_pool.unsqueeze(-1) * matrix.unsqueeze(0).expand(batch_size, -1,
-                                                                            -1) * persona_concept_mask.unsqueeze(
-        1)  # [bs, 2680, 2680]
-
-    if use_min:
-        d_c2p = \
-            torch.where(masked_matrix.eq(0), torch.ones_like(masked_matrix) * max, masked_matrix).view(batch_size,
-                                                                                                       -1).min(
-                dim=-1)[0]
-    else:
-        d_c2p = masked_matrix.view(batch_size, -1).sum(dim=-1) / ((masked_matrix.view(batch_size, -1) > 0) + 0.).sum(
-            -1).clamp(1e-5)
-    # d_c2p = masked_matrix.view(batch_size, -1).max(dim=-1)[0]
-
-    masked_matrix = matrix * persona_concept_mask.unsqueeze(1)
-    if use_min:
-        d_n2p = torch.where(masked_matrix.eq(0), torch.ones_like(masked_matrix) * max, masked_matrix).min(dim=-1)[0]
-    else:
-        d_n2p = masked_matrix.sum(-1) / (((persona_concept_mask) > 0) + 0.).sum(-1).unsqueeze(-1).clamp(1e-5)
-    to_persona_pool = (d_n2p - d_c2p.unsqueeze(-1)) < 0
-
-    # No concepts then this pool = 1
-    to_persona_pool = to_persona_pool * has_concept + (1 - has_concept)
-    # 去掉 word vocab 没有的
-    to_persona_pool = to_persona_pool * concept2words_map.sum(-1).ne(0)
-
-    return to_persona_pool
-
-
 def cal_concept_set(opt, context_concepts, persona_set, kw_graph_distance_matrix, device, concept2words_map, k=250):
     context_lower_bound = opt.get('context_lower_bound')
 
@@ -346,38 +189,13 @@ def cal_concept_set(opt, context_concepts, persona_set, kw_graph_distance_matrix
     SET_EXPANSION()
     union_set = set_union_operation(context_set, persona_set)
     SET_EXPANSION()
-    expanded_set = set_expa_operation(dist_matrix=kw_graph_distance_matrix,
-                                      concept_set=union_set, topk=k,
+    expanded_set = set_expa_operation(union_set, dist_matrix=kw_graph_distance_matrix, topk=k,
                                       concept2words_map=concept2words_map)
 
     has_concept = expanded_set.sum(-1).clamp(0, 1).unsqueeze(-1)
     expanded_set = expanded_set * has_concept + (1 - has_concept)
 
     return expanded_set
-
-
-def cal_middle_pool(distance_matrix, context_pool, persona_concept_mask, softmax, topk, concept2words_map):
-    max = distance_matrix['max']
-    matrix = distance_matrix['matrix']
-    end_pool = context_pool + persona_concept_mask
-
-    num_end = end_pool.sum(-1).unsqueeze(-1)
-
-    masked_matrix = matrix * end_pool.unsqueeze(1)
-    logits = max - (masked_matrix.sum(-1) / (num_end.clamp(1e-5)))
-
-    # 去掉 GPT 词典中没有的 concept for attention calculation
-    logits = logits * concept2words_map.sum(-1).ne(0)
-
-    probs = softmax(top_k_logits(logits, topk))
-
-    # 精确 topk 个数，for attention calculation
-    pool = torch.scatter(input=torch.zeros_like(probs),
-                         index=probs.topk(topk)[1],
-                         src=torch.ones_like(probs),
-                         dim=-1)
-
-    return pool
 
 
 def cal_lm_word_probs(logits, softmax, temperature=1.0):
@@ -784,3 +602,33 @@ def top_k_logits(logits, k):
         values = torch.topk(logits, k)[0]
         batch_mins = values[..., -1:]
         return torch.where(logits < batch_mins, torch.ones_like(logits) * -1e10, logits)
+
+
+def visualize_samples(data_for_visualization, dict, valid_inds, observations):
+    i = random.randint(0, len(data_for_visualization) - 1)
+    prediction = data_for_visualization[i]['prediction']
+    final_pool = data_for_visualization[i]['final_pool']
+    concept_word_probs = data_for_visualization[i]['concept_word_probs']
+    hybrid_word_probs = data_for_visualization[i]['hybrid_word_probs']
+    lm_word_probs = data_for_visualization[i]['lm_word_probs']
+    gate = data_for_visualization[i]['gate'].squeeze(-1).tolist()
+
+    #  construct visulization strings
+    line_outputs = dict.vec2words(prediction.tolist())
+    vis_prediction = ' '.join(['{:>5}'.format(i) for i in line_outputs])
+    vis_lm_word_probs = visualize_topk_nodes_with_values(lm_word_probs, dict, k=5, concept=False, matrix=True)
+    vis_concept_word_probs = visualize_topk_nodes_with_values(concept_word_probs, dict, k=5, concept=False,
+                                                              matrix=True)
+    vis_hybrid_word_probs = visualize_topk_nodes_with_values(hybrid_word_probs, dict, k=5, concept=False,
+                                                             matrix=True)
+    print('=' * 150)
+    print('Text | {}'.format(observations[valid_inds[i]]['text']))
+    print('Concept Set | {}'.format(len(final_pool)))
+    print('Generation | {}'.format(vis_prediction))
+    gate_str = ' '.join(['{:>7}'.format(w) + '(' + str('{:.4f}'.format(g)) + ')' for w, g in
+                         zip(line_outputs, gate)])
+    print('Gate | {}'.format(gate_str))
+    print('Set Attention | {}'.format(vis_concept_word_probs))
+    print('Word Likelihood | {}'.format(vis_hybrid_word_probs))
+
+    return

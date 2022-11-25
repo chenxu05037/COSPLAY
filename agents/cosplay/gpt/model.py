@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from pytorch_pretrained_bert import OpenAIGPTLMHeadModel
 import os
 
-from concept_set_framework import cal_concept_word_probs, cal_hybrid_word_probs, id2keyword, cal_lm_word_probs, \
+from concept_set_framework import cal_concept_word_probs, cal_hybrid_word_probs, id2concept, cal_lm_word_probs, \
     cal_concept_word_probs_attention
 
 
@@ -795,7 +795,7 @@ class Gpt2SeqModel(nn.Module):
 
                     # data_for_visualization[step]['from_context_probs'] = best_walk_probs.squeeze()
                     # data_for_visualization[step]['to_persona_probs'] = best_jump_probs.squeeze()
-                    data_for_visualization[step]['final_pool'] = [id2keyword[i] for i in
+                    data_for_visualization[step]['final_pool'] = [id2concept[i] for i in
                                                                   torch.where(best_final_pool.squeeze().eq(1))[
                                                                       0].tolist()]
                     data_for_visualization[step]['hybrid_word_probs'] = hybrid_word_probs.squeeze()
