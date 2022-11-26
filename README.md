@@ -1,7 +1,8 @@
 # COSPLAY
 
-This is a messy version code (under testing) for the
-paper [COSPLAY: Concept Set Guided Personalized Dialogue Generation Across Both Party Personas](https://dl.acm.org/doi/abs/10.1145/3477495.3531957) (SIGIR 2022).
+This is an early version code for the
+paper [COSPLAY: Concept Set Guided Personalized Dialogue Generation Across Both Party Personas](https://dl.acm.org/doi/abs/10.1145/3477495.3531957) (SIGIR 2022)
+and a 10-minute video in the link is provided for a quick and intuitive understanding of the paper.
 
 ## Environment
 
