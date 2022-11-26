@@ -113,9 +113,10 @@ def concept_set(concepts, device):
 def set_dist_operation(a, b, dist_matrix):
     matrix = dist_matrix['matrix']
     dist = a.unsqueeze(0).mm(matrix).mm(b.unsqueeze(1)) / (a.sum() * b.sum())
-    dist = dist.item()
     if dist.isnan():
         dist = dist_matrix['max']
+    else:
+        dist = dist.item()
     return dist
 
 
