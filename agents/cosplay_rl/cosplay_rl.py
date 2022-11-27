@@ -1168,7 +1168,7 @@ class CosplayRLAgent(Agent):
                 COMMON_GROUND_REWARD()
                 d_FS = set_dist_operation(future_set[idx_batch], self_persona_set, self.kw_graph_distance_matrix)
                 d_FP = set_dist_operation(future_set[idx_batch], partner_persona_set, self.kw_graph_distance_matrix)
-                common_ground_rewards[idx_batch][idx_turn] += -(d_FS + d_FP)
+                common_ground_rewards[idx_batch][idx_turn] += (1 / d_FS + 1 / d_FP)
 
                 PERSONA_RECALL_SCORE()
                 both_persona_set = set_union_operation(self_persona_set, partner_persona_set)
